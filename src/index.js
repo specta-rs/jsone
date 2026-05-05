@@ -12,7 +12,7 @@ const hasOwn = Object.prototype.hasOwnProperty;
  * Object and array containers are mutated in place. If you need to keep the
  * original value unchanged, clone first, for example with `structuredClone`.
  *
- * ```ts
+ * ```js
  * const encoded = encode(structuredClone(value));
  * // or
  * const json = JSON.stringify(value, (_key, value) => encode(value));
@@ -20,12 +20,20 @@ const hasOwn = Object.prototype.hasOwnProperty;
  *
  * If the root value itself needs remapping, a new remapped wrapper is returned
  * because primitives cannot be reassigned in place.
+ *
+ * @param {unknown} value
+ * @returns {unknown}
  */
-export function encode(value: unknown): unknown {
+export function encode(value) {
   return encodeValue(value);
 }
 
-function encodeValue(value: unknown, seen?: WeakSet<object>): unknown {
+/**
+ * @param {unknown} value
+ * @param {WeakSet<object>} [seen]
+ * @returns {unknown}
+ */
+function encodeValue(value, seen) {
   if (typeof value === "bigint") return { [REMAP_KEY]: value.toString() };
   else if (typeof value === "number") {
     if (Number.isNaN(value)) return { [REMAP_KEY]: 1 };
@@ -37,7 +45,7 @@ function encodeValue(value: unknown, seen?: WeakSet<object>): unknown {
 
   if (typeof value !== "object" || value === null) return value;
 
-  seen ??= new WeakSet<object>();
+  seen ??= new WeakSet();
   if (seen.has(value)) return value;
 
   seen.add(value);
@@ -49,10 +57,8 @@ function encodeValue(value: unknown, seen?: WeakSet<object>): unknown {
     return value;
   }
 
-  const record = value as Record<string, unknown>;
-
-  for (const key in record)
-    if (hasOwn.call(record, key)) record[key] = encodeValue(record[key], seen);
+  for (const key in value)
+    if (hasOwn.call(value, key)) value[key] = encodeValue(value[key], seen);
 
   return value;
 }
@@ -66,31 +72,33 @@ function encodeValue(value: unknown, seen?: WeakSet<object>): unknown {
  * Object and array containers are mutated in place. If you need to keep the
  * original value unchanged, clone first, for example with `structuredClone`.
  *
- * ```ts
+ * ```js
  * const value = decode(encoded);
  * // or
  * const value = JSON.parse(json, (_key, value) => decode(value));
  * ```
+ *
+ * @param {unknown} value
+ * @returns {unknown}
  */
-export function decode(value: unknown): unknown {
+export function decode(value) {
   if (typeof value !== "object" || value === null) return value;
 
-  const record = value as Record<string, unknown>;
   let isRemappedWrapper = false;
-  let remapped: unknown;
 
-  for (const key in record) {
-    if (!hasOwn.call(record, key)) continue;
+  for (const key in value) {
+    if (!hasOwn.call(value, key)) continue;
     if (key !== REMAP_KEY) {
       isRemappedWrapper = false;
       break;
     }
 
     isRemappedWrapper = true;
-    remapped = record[key];
   }
 
   if (isRemappedWrapper) {
+    const remapped = value[REMAP_KEY];
+
     if (typeof remapped === "string") return BigInt(remapped);
     if (remapped === 1) return Number.NaN;
     if (remapped === 2) return Number.POSITIVE_INFINITY;
@@ -108,8 +116,8 @@ export function decode(value: unknown): unknown {
     return value;
   }
 
-  for (const key in record)
-    if (hasOwn.call(record, key)) record[key] = decode(record[key]);
+  for (const key in value)
+    if (hasOwn.call(value, key)) value[key] = decode(value[key]);
 
   return value;
 }

@@ -50,7 +50,7 @@ use std::fmt;
 
 // This is used to hide the raw string from being printed by Rustdoc inline.
 // We do that manually using a revealable section.
-const JS_RUNTIME_STR: &str = include_str!("./index.ts");
+const JS_RUNTIME_STR: &str = include_str!("./index.js");
 
 /// The JavaScript runtime for encoding and decoding.
 ///
@@ -60,10 +60,10 @@ const JS_RUNTIME_STR: &str = include_str!("./index.ts");
 #[doc = "<summary>Show JavaScript runtime</summary>"]
 #[doc = ""]
 #[doc = "```ts"]
-#[doc = include_str!("./index.ts")]
+#[doc = include_str!("./index.js")]
 #[doc = "```"]
 #[doc = "</details>"]
-pub const RUNTIME: &str = JS_RUNTIME_STR;
+pub const JS_RUNTIME: &str = JS_RUNTIME_STR;
 
 /// Field name used for the JSON object that marks the remapped value.
 /// Changing this would require the frontend to also reflect the new value so would be a majorly breaking change.
