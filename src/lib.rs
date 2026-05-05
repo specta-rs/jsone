@@ -1,7 +1,7 @@
 //! Serde helpers for values that need a JSON representation which JavaScript can
 //! decode without losing precision.
 //!
-//! This crate exposes a single wrapper type, [`BigInt<T>`] which wraps any field or type,
+//! This crate exposes a single wrapper type, [`Jsone<T>`] which wraps any field or type,
 //! and handles the lossless serialization and deserialization of values in Rust. You must
 //! pair this with the frontend encoder or decoder to turn the response back to regular JavaScript.
 //!
@@ -24,19 +24,19 @@
 //! # Example
 //!
 //! ```
-//! use jsone::BigInt;
+//! use jsone::Jsone;
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[derive(Debug, Deserialize, PartialEq, Serialize)]
 //! struct Payload {
-//!     id: BigInt<i32>,
+//!     id: Jsone<i32>,
 //! }
 //!
-//! let json = serde_json::to_string(&Payload { id: BigInt(42) }).unwrap();
+//! let json = serde_json::to_string(&Payload { id: Jsone(42) }).unwrap();
 //! assert_eq!(json, r#"{"id":{"$$jsone$remap$$":"42"}}"#);
 //!
 //! let payload: Payload = serde_json::from_str(&json).unwrap();
-//! assert_eq!(payload.id, BigInt(42));
+//! assert_eq!(payload.id, Jsone(42));
 //! ```
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -62,9 +62,9 @@ const REMAP_KEY: &str = "$$jsone$remap$$";
 /// Refer to the crate documentation for an explanation.
 ///
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Copy)]
-pub struct BigInt<T>(pub T);
+pub struct Jsone<T>(pub T);
 
-impl<T> Serialize for BigInt<T>
+impl<T> Serialize for Jsone<T>
 where
     T: Serialize,
 {
@@ -72,13 +72,13 @@ where
     where
         S: Serializer,
     {
-        self.0.serialize(BigIntSerializer(serializer))
+        self.0.serialize(JsoneSerializer(serializer))
     }
 }
 
-struct BigIntValueSerialize<'a, T: ?Sized>(&'a T);
+struct JsoneValueSerialize<'a, T: ?Sized>(&'a T);
 
-impl<T> Serialize for BigIntValueSerialize<'_, T>
+impl<T> Serialize for JsoneValueSerialize<'_, T>
 where
     T: ?Sized + Serialize,
 {
@@ -86,11 +86,11 @@ where
     where
         S: Serializer,
     {
-        self.0.serialize(BigIntSerializer(serializer))
+        self.0.serialize(JsoneSerializer(serializer))
     }
 }
 
-struct BigIntSerializer<S>(S);
+struct JsoneSerializer<S>(S);
 
 macro_rules! serialize_number_as_string {
     ($method:ident, $ty:ty) => {
@@ -110,19 +110,19 @@ where
     map.end()
 }
 
-impl<S> Serializer for BigIntSerializer<S>
+impl<S> Serializer for JsoneSerializer<S>
 where
     S: Serializer,
 {
     type Ok = S::Ok;
     type Error = S::Error;
-    type SerializeSeq = BigIntSerializeSeq<S::SerializeSeq>;
-    type SerializeTuple = BigIntSerializeTuple<S::SerializeTuple>;
-    type SerializeTupleStruct = BigIntSerializeTupleStruct<S::SerializeTupleStruct>;
-    type SerializeTupleVariant = BigIntSerializeTupleVariant<S::SerializeTupleVariant>;
-    type SerializeMap = BigIntSerializeMap<S::SerializeMap>;
-    type SerializeStruct = BigIntSerializeStruct<S::SerializeStruct>;
-    type SerializeStructVariant = BigIntSerializeStructVariant<S::SerializeStructVariant>;
+    type SerializeSeq = JsoneSerializeSeq<S::SerializeSeq>;
+    type SerializeTuple = JsoneSerializeTuple<S::SerializeTuple>;
+    type SerializeTupleStruct = JsoneSerializeTupleStruct<S::SerializeTupleStruct>;
+    type SerializeTupleVariant = JsoneSerializeTupleVariant<S::SerializeTupleVariant>;
+    type SerializeMap = JsoneSerializeMap<S::SerializeMap>;
+    type SerializeStruct = JsoneSerializeStruct<S::SerializeStruct>;
+    type SerializeStructVariant = JsoneSerializeStructVariant<S::SerializeStructVariant>;
 
     fn serialize_bool(self, value: bool) -> Result<Self::Ok, Self::Error> {
         self.0.serialize_bool(value)
@@ -175,7 +175,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_some(&BigIntValueSerialize(value))
+        self.0.serialize_some(&JsoneValueSerialize(value))
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
@@ -204,7 +204,7 @@ where
         T: ?Sized + Serialize,
     {
         self.0
-            .serialize_newtype_struct(name, &BigIntValueSerialize(value))
+            .serialize_newtype_struct(name, &JsoneValueSerialize(value))
     }
 
     fn serialize_newtype_variant<T>(
@@ -218,15 +218,15 @@ where
         T: ?Sized + Serialize,
     {
         self.0
-            .serialize_newtype_variant(name, variant_index, variant, &BigIntValueSerialize(value))
+            .serialize_newtype_variant(name, variant_index, variant, &JsoneValueSerialize(value))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        self.0.serialize_seq(len).map(BigIntSerializeSeq)
+        self.0.serialize_seq(len).map(JsoneSerializeSeq)
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        self.0.serialize_tuple(len).map(BigIntSerializeTuple)
+        self.0.serialize_tuple(len).map(JsoneSerializeTuple)
     }
 
     fn serialize_tuple_struct(
@@ -236,7 +236,7 @@ where
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         self.0
             .serialize_tuple_struct(name, len)
-            .map(BigIntSerializeTupleStruct)
+            .map(JsoneSerializeTupleStruct)
     }
 
     fn serialize_tuple_variant(
@@ -248,11 +248,11 @@ where
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         self.0
             .serialize_tuple_variant(name, variant_index, variant, len)
-            .map(BigIntSerializeTupleVariant)
+            .map(JsoneSerializeTupleVariant)
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        self.0.serialize_map(len).map(BigIntSerializeMap)
+        self.0.serialize_map(len).map(JsoneSerializeMap)
     }
 
     fn serialize_struct(
@@ -262,7 +262,7 @@ where
     ) -> Result<Self::SerializeStruct, Self::Error> {
         self.0
             .serialize_struct(name, len)
-            .map(BigIntSerializeStruct)
+            .map(JsoneSerializeStruct)
     }
 
     fn serialize_struct_variant(
@@ -274,7 +274,7 @@ where
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         self.0
             .serialize_struct_variant(name, variant_index, variant, len)
-            .map(BigIntSerializeStructVariant)
+            .map(JsoneSerializeStructVariant)
     }
 
     fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
@@ -285,9 +285,9 @@ where
     }
 }
 
-struct BigIntSerializeSeq<S>(S);
+struct JsoneSerializeSeq<S>(S);
 
-impl<S> SerializeSeq for BigIntSerializeSeq<S>
+impl<S> SerializeSeq for JsoneSerializeSeq<S>
 where
     S: SerializeSeq,
 {
@@ -298,7 +298,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_element(&BigIntValueSerialize(value))
+        self.0.serialize_element(&JsoneValueSerialize(value))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -306,9 +306,9 @@ where
     }
 }
 
-struct BigIntSerializeTuple<S>(S);
+struct JsoneSerializeTuple<S>(S);
 
-impl<S> SerializeTuple for BigIntSerializeTuple<S>
+impl<S> SerializeTuple for JsoneSerializeTuple<S>
 where
     S: SerializeTuple,
 {
@@ -319,7 +319,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_element(&BigIntValueSerialize(value))
+        self.0.serialize_element(&JsoneValueSerialize(value))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -327,9 +327,9 @@ where
     }
 }
 
-struct BigIntSerializeTupleStruct<S>(S);
+struct JsoneSerializeTupleStruct<S>(S);
 
-impl<S> SerializeTupleStruct for BigIntSerializeTupleStruct<S>
+impl<S> SerializeTupleStruct for JsoneSerializeTupleStruct<S>
 where
     S: SerializeTupleStruct,
 {
@@ -340,7 +340,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_field(&BigIntValueSerialize(value))
+        self.0.serialize_field(&JsoneValueSerialize(value))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -348,9 +348,9 @@ where
     }
 }
 
-struct BigIntSerializeTupleVariant<S>(S);
+struct JsoneSerializeTupleVariant<S>(S);
 
-impl<S> SerializeTupleVariant for BigIntSerializeTupleVariant<S>
+impl<S> SerializeTupleVariant for JsoneSerializeTupleVariant<S>
 where
     S: SerializeTupleVariant,
 {
@@ -361,7 +361,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_field(&BigIntValueSerialize(value))
+        self.0.serialize_field(&JsoneValueSerialize(value))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -369,9 +369,9 @@ where
     }
 }
 
-struct BigIntSerializeMap<S>(S);
+struct JsoneSerializeMap<S>(S);
 
-impl<S> SerializeMap for BigIntSerializeMap<S>
+impl<S> SerializeMap for JsoneSerializeMap<S>
 where
     S: SerializeMap,
 {
@@ -389,7 +389,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_value(&BigIntValueSerialize(value))
+        self.0.serialize_value(&JsoneValueSerialize(value))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -397,9 +397,9 @@ where
     }
 }
 
-struct BigIntSerializeStruct<S>(S);
+struct JsoneSerializeStruct<S>(S);
 
-impl<S> SerializeStruct for BigIntSerializeStruct<S>
+impl<S> SerializeStruct for JsoneSerializeStruct<S>
 where
     S: SerializeStruct,
 {
@@ -410,7 +410,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_field(key, &BigIntValueSerialize(value))
+        self.0.serialize_field(key, &JsoneValueSerialize(value))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -418,9 +418,9 @@ where
     }
 }
 
-struct BigIntSerializeStructVariant<S>(S);
+struct JsoneSerializeStructVariant<S>(S);
 
-impl<S> SerializeStructVariant for BigIntSerializeStructVariant<S>
+impl<S> SerializeStructVariant for JsoneSerializeStructVariant<S>
 where
     S: SerializeStructVariant,
 {
@@ -431,7 +431,7 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.0.serialize_field(key, &BigIntValueSerialize(value))
+        self.0.serialize_field(key, &JsoneValueSerialize(value))
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -439,7 +439,7 @@ where
     }
 }
 
-impl<'de, T> Deserialize<'de> for BigInt<T>
+impl<'de, T> Deserialize<'de> for Jsone<T>
 where
     T: Deserialize<'de>,
 {
@@ -449,8 +449,8 @@ where
     {
         let value = serde_json::Value::deserialize(deserializer)?;
 
-        T::deserialize(BigIntJsonValueDeserializer(unwrap_remapped_values(value)))
-            .map(BigInt)
+        T::deserialize(JsoneJsonValueDeserializer(unwrap_remapped_values(value)))
+            .map(Jsone)
             .map_err(D::Error::custom)
     }
 }
@@ -488,7 +488,7 @@ fn unwrap_remapped_values(value: serde_json::Value) -> serde_json::Value {
     }
 }
 
-struct BigIntJsonValueDeserializer(serde_json::Value);
+struct JsoneJsonValueDeserializer(serde_json::Value);
 
 macro_rules! deserialize_json_number_from_string {
     ($method:ident, $visit:ident, $ty:ty) => {
@@ -506,7 +506,7 @@ macro_rules! deserialize_json_number_from_string {
     };
 }
 
-impl<'de> Deserializer<'de> for BigIntJsonValueDeserializer {
+impl<'de> Deserializer<'de> for JsoneJsonValueDeserializer {
     type Error = serde_json::Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -520,10 +520,10 @@ impl<'de> Deserializer<'de> for BigIntJsonValueDeserializer {
                 .into_deserializer()
                 .deserialize_any(visitor),
             serde_json::Value::String(value) => visitor.visit_string(value),
-            serde_json::Value::Array(values) => visitor.visit_seq(BigIntJsonSeqAccess {
+            serde_json::Value::Array(values) => visitor.visit_seq(JsoneJsonSeqAccess {
                 values: values.into_iter(),
             }),
-            serde_json::Value::Object(values) => visitor.visit_map(BigIntJsonMapAccess {
+            serde_json::Value::Object(values) => visitor.visit_map(JsoneJsonMapAccess {
                 values: values.into_iter(),
                 next_value: None,
             }),
@@ -588,11 +588,11 @@ impl<'de> Deserializer<'de> for BigIntJsonValueDeserializer {
     }
 }
 
-struct BigIntJsonSeqAccess {
+struct JsoneJsonSeqAccess {
     values: std::vec::IntoIter<serde_json::Value>,
 }
 
-impl<'de> SeqAccess<'de> for BigIntJsonSeqAccess {
+impl<'de> SeqAccess<'de> for JsoneJsonSeqAccess {
     type Error = serde_json::Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -601,17 +601,17 @@ impl<'de> SeqAccess<'de> for BigIntJsonSeqAccess {
     {
         self.values
             .next()
-            .map(|value| seed.deserialize(BigIntJsonValueDeserializer(value)))
+            .map(|value| seed.deserialize(JsoneJsonValueDeserializer(value)))
             .transpose()
     }
 }
 
-struct BigIntJsonMapAccess {
+struct JsoneJsonMapAccess {
     values: serde_json::map::IntoIter,
     next_value: Option<serde_json::Value>,
 }
 
-impl<'de> MapAccess<'de> for BigIntJsonMapAccess {
+impl<'de> MapAccess<'de> for JsoneJsonMapAccess {
     type Error = serde_json::Error;
 
     fn next_key_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -636,23 +636,23 @@ impl<'de> MapAccess<'de> for BigIntJsonMapAccess {
             .take()
             .ok_or_else(|| Self::Error::custom("value is missing for map key"))?;
 
-        seed.deserialize(BigIntJsonValueDeserializer(value))
+        seed.deserialize(JsoneJsonValueDeserializer(value))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BigInt, REMAP_KEY};
+    use super::{Jsone, REMAP_KEY};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Deserialize, PartialEq, Serialize)]
     struct Payload {
-        value: BigInt<i32>,
+        value: Jsone<i32>,
     }
 
     #[derive(Debug, Deserialize, PartialEq, Serialize)]
     struct NestedPayload {
-        value: BigInt<Nested>,
+        value: Jsone<Nested>,
     }
 
     #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -669,24 +669,24 @@ mod tests {
     }
 
     #[test]
-    fn serializes_value_as_string_wrapped_by_bigint_key() {
-        let json = serde_json::to_string(&Payload { value: BigInt(123) }).unwrap();
+    fn serializes_value_as_string_wrapped_by_remap_key() {
+        let json = serde_json::to_string(&Payload { value: Jsone(123) }).unwrap();
 
         assert_eq!(json, r#"{"value":{"$$jsone$remap$$":"123"}}"#);
     }
 
     #[test]
-    fn deserializes_value_from_string_wrapped_by_bigint_key() {
+    fn deserializes_value_from_string_wrapped_by_remap_key() {
         let payload: Payload =
             serde_json::from_str(r#"{"value":{"$$jsone$remap$$":"123"}}"#).unwrap();
 
-        assert_eq!(payload, Payload { value: BigInt(123) });
+        assert_eq!(payload, Payload { value: Jsone(123) });
     }
 
     #[test]
     fn serializes_nested_object_number_fields_at_their_original_locations() {
         let json = serde_json::to_string(&NestedPayload {
-            value: BigInt(Nested {
+            value: Jsone(Nested {
                 id: 123,
                 label: "unchanged".to_owned(),
                 child: NestedChild {
@@ -705,7 +705,7 @@ mod tests {
 
     #[test]
     fn serializes_nested_array_number_fields_at_their_original_locations() {
-        let json = serde_json::to_string(&BigInt(vec![
+        let json = serde_json::to_string(&Jsone(vec![
             Nested {
                 id: 123,
                 label: "first".to_owned(),
@@ -741,7 +741,7 @@ mod tests {
         assert_eq!(
             payload,
             NestedPayload {
-                value: BigInt(Nested {
+                value: Jsone(Nested {
                     id: 123,
                     label: "unchanged".to_owned(),
                     child: NestedChild {
@@ -756,15 +756,15 @@ mod tests {
     #[test]
     fn serializes_special_float_values_as_numeric_codes() {
         assert_eq!(
-            serde_json::to_string(&BigInt(f64::NAN)).unwrap(),
+            serde_json::to_string(&Jsone(f64::NAN)).unwrap(),
             format!(r#"{{"{REMAP_KEY}":1}}"#)
         );
         assert_eq!(
-            serde_json::to_string(&BigInt(f64::INFINITY)).unwrap(),
+            serde_json::to_string(&Jsone(f64::INFINITY)).unwrap(),
             format!(r#"{{"{REMAP_KEY}":2}}"#)
         );
         assert_eq!(
-            serde_json::to_string(&BigInt(f64::NEG_INFINITY)).unwrap(),
+            serde_json::to_string(&Jsone(f64::NEG_INFINITY)).unwrap(),
             format!(r#"{{"{REMAP_KEY}":3}}"#)
         );
     }
@@ -772,31 +772,31 @@ mod tests {
     #[test]
     fn deserializes_special_float_numeric_codes() {
         assert!(
-            serde_json::from_str::<BigInt<f64>>(&format!(r#"{{"{REMAP_KEY}":1}}"#))
+            serde_json::from_str::<Jsone<f64>>(&format!(r#"{{"{REMAP_KEY}":1}}"#))
                 .unwrap()
                 .0
                 .is_nan()
         );
         assert_eq!(
-            serde_json::from_str::<BigInt<f64>>(&format!(r#"{{"{REMAP_KEY}":2}}"#)).unwrap(),
-            BigInt(f64::INFINITY)
+            serde_json::from_str::<Jsone<f64>>(&format!(r#"{{"{REMAP_KEY}":2}}"#)).unwrap(),
+            Jsone(f64::INFINITY)
         );
         assert_eq!(
-            serde_json::from_str::<BigInt<f64>>(&format!(r#"{{"{REMAP_KEY}":3}}"#)).unwrap(),
-            BigInt(f64::NEG_INFINITY)
+            serde_json::from_str::<Jsone<f64>>(&format!(r#"{{"{REMAP_KEY}":3}}"#)).unwrap(),
+            Jsone(f64::NEG_INFINITY)
         );
     }
 
     #[test]
     fn rejects_unknown_fields() {
-        let error = serde_json::from_str::<BigInt<i32>>(r#"{"unknown":"123"}"#).unwrap_err();
+        let error = serde_json::from_str::<Jsone<i32>>(r#"{"unknown":"123"}"#).unwrap_err();
 
         assert!(error.to_string().contains("invalid type"));
     }
 
     #[test]
-    fn rejects_missing_bigint_key() {
-        let error = serde_json::from_str::<BigInt<i32>>("{}").unwrap_err();
+    fn rejects_missing_remap_key() {
+        let error = serde_json::from_str::<Jsone<i32>>("{}").unwrap_err();
 
         assert!(error.to_string().contains("invalid type"));
     }
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn rejects_invalid_special_numeric_code() {
         let error =
-            serde_json::from_str::<BigInt<f64>>(&format!(r#"{{"{REMAP_KEY}":4}}"#)).unwrap_err();
+            serde_json::from_str::<Jsone<f64>>(&format!(r#"{{"{REMAP_KEY}":4}}"#)).unwrap_err();
 
         assert!(error.to_string().contains("invalid type"));
     }

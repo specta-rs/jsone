@@ -11,7 +11,7 @@ export type RemappedBigInt = {
  *
  * Bigint values are encoded as `{ "$$jsone$remap$$": "<value>" }` so the
  * resulting string is valid JSON and can be deserialized by this package's Rust
- * `BigInt<T>` wrapper.
+ * `Jsone<T>` wrapper.
  */
 export function stringify(value: unknown, space?: string | number): string {
   return JSON.stringify(
