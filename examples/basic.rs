@@ -24,11 +24,11 @@ fn main() {
             id: BigInt(f64::NAN),
         })
         .unwrap();
-        assert_eq!(json, r#"{"id":{"$$jsone$remap$$":"42"}}"#);
+        assert_eq!(json, r#"{"id":{"$$jsone$remap$$":1}}"#);
         println!("{json}");
 
         let payload: Payload<f64> = serde_json::from_str(&json).unwrap();
-        assert_eq!(payload.id, BigInt(f64::NAN));
+        assert!(payload.id.0.is_nan());
         println!("{payload:?}");
     }
 }
