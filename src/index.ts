@@ -1,14 +1,6 @@
 // This MUST match the value in Rust.
 const REMAP_KEY = "$$jsone$remap$$";
 
-/** Wire-format object used to represent values that JSON cannot carry losslessly. */
-export type RemappedValue = {
-  [REMAP_KEY]: string | 1 | 2 | 3;
-};
-
-/** Wire-format object used to represent a JavaScript bigint in JSON. */
-export type RemappedBigInt = RemappedValue;
-
 /**
  * JSON.stringify replacer that encodes values JSON cannot carry losslessly.
  *
@@ -30,17 +22,15 @@ export function replacer(_key: string, value: unknown): unknown {
  * If the root value itself needs remapping, a new remapped wrapper is returned
  * because primitives cannot be reassigned in place.
  */
-export function remapValuesInPlace<T>(value: T): T | RemappedValue {
-  return remapValuesInPlaceInner(value, new WeakSet<object>()) as
-    | T
-    | RemappedValue;
+export function remapValuesInPlace<T>(value: T): unknown {
+  return remapValuesInPlaceInner(value, new WeakSet<object>());
 }
 
 /**
  * @deprecated Use `remapValuesInPlace`, which also remaps unsafe numbers and
  * special floating point values.
  */
-export function remapBigIntsInPlace<T>(value: T): T | RemappedBigInt {
+export function remapBigIntsInPlace<T>(value: T): unknown {
   return remapValuesInPlace(value);
 }
 
@@ -68,11 +58,11 @@ function remapValue(value: unknown): unknown {
   return value;
 }
 
-function remapBigInt(value: bigint): RemappedValue {
+function remapBigInt(value: bigint): unknown {
   return { [REMAP_KEY]: value.toString() };
 }
 
-function remapNumber(value: number): number | RemappedValue {
+function remapNumber(value: number): unknown {
   if (Number.isNaN(value)) {
     return { [REMAP_KEY]: 1 };
   }
@@ -92,7 +82,7 @@ function remapNumber(value: number): number | RemappedValue {
   return value;
 }
 
-function restoreValue(value: RemappedValue): bigint | number {
+function restoreValue(value: Record<typeof REMAP_KEY, unknown>): bigint | number {
   const remapped = value[REMAP_KEY];
 
   if (typeof remapped === "string") {
@@ -114,7 +104,7 @@ function restoreValue(value: RemappedValue): bigint | number {
   throw new TypeError(`unknown remapped numeric code: ${remapped}`);
 }
 
-function isRemappedValue(value: unknown): value is RemappedValue {
+function isRemappedValue(value: unknown): value is Record<typeof REMAP_KEY, unknown> {
   return (
     typeof value === "object" &&
     value !== null &&
