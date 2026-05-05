@@ -40,7 +40,9 @@
 //! ```
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use serde::de::{Error, IntoDeserializer, MapAccess, SeqAccess, Visitor};
+use serde::de::{
+    EnumAccess, Error, IntoDeserializer, MapAccess, SeqAccess, VariantAccess, Visitor,
+};
 use serde::ser::{
     SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant,
@@ -180,10 +182,8 @@ where
             serialize_remapped_value(self.0, &2u8)
         } else if value == f64::NEG_INFINITY {
             serialize_remapped_value(self.0, &3u8)
-        } else if value >= MIN_SAFE_INTEGER as f64 && value <= MAX_SAFE_INTEGER as f64 {
-            self.0.serialize_f64(value)
         } else {
-            serialize_remapped_value(self.0, &value.to_string())
+            self.0.serialize_f64(value)
         }
     }
 
@@ -623,9 +623,99 @@ impl<'de> Deserializer<'de> for JsoneJsonValueDeserializer {
         visitor.visit_newtype_struct(self)
     }
 
+    fn deserialize_enum<V>(
+        self,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.0 {
+            serde_json::Value::String(variant) => visitor.visit_enum(JsoneJsonEnumAccess {
+                variant,
+                value: None,
+            }),
+            serde_json::Value::Object(values) if values.len() == 1 => {
+                let (variant, value) = values.into_iter().next().expect("map has one value");
+                visitor.visit_enum(JsoneJsonEnumAccess {
+                    variant,
+                    value: Some(value),
+                })
+            }
+            value => value
+                .into_deserializer()
+                .deserialize_enum(_name, _variants, visitor),
+        }
+    }
+
     forward_to_deserialize_any! {
         bool char str string bytes byte_buf option unit unit_struct seq tuple
-        tuple_struct map struct enum identifier ignored_any
+        tuple_struct map struct identifier ignored_any
+    }
+}
+
+struct JsoneJsonEnumAccess {
+    variant: String,
+    value: Option<serde_json::Value>,
+}
+
+impl<'de> EnumAccess<'de> for JsoneJsonEnumAccess {
+    type Error = serde_json::Error;
+    type Variant = JsoneJsonVariantAccess;
+
+    fn variant_seed<T>(self, seed: T) -> Result<(T::Value, Self::Variant), Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        let variant = seed.deserialize(self.variant.into_deserializer())?;
+
+        Ok((variant, JsoneJsonVariantAccess { value: self.value }))
+    }
+}
+
+struct JsoneJsonVariantAccess {
+    value: Option<serde_json::Value>,
+}
+
+impl<'de> VariantAccess<'de> for JsoneJsonVariantAccess {
+    type Error = serde_json::Error;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        match self.value {
+            None | Some(serde_json::Value::Null) => Ok(()),
+            Some(value) => serde::Deserialize::deserialize(JsoneJsonValueDeserializer(value)),
+        }
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        seed.deserialize(JsoneJsonValueDeserializer(
+            self.value.unwrap_or(serde_json::Value::Null),
+        ))
+    }
+
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        JsoneJsonValueDeserializer(self.value.unwrap_or(serde_json::Value::Null))
+            .deserialize_seq(visitor)
+    }
+
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        JsoneJsonValueDeserializer(self.value.unwrap_or(serde_json::Value::Null))
+            .deserialize_map(visitor)
     }
 }
 
@@ -707,6 +797,17 @@ mod tests {
     struct NestedChild {
         count: i32,
         active: bool,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct CallbackFn(u32);
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    enum Message {
+        Unit,
+        Newtype(u64),
+        Tuple(u64, i64),
+        Struct { id: u64 },
     }
 
     #[test]
@@ -845,6 +946,56 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Jsone<f64>>(&format!(r#"{{"{REMAP_KEY}":3}}"#)).unwrap(),
             Jsone(f64::NEG_INFINITY)
+        );
+    }
+
+    #[test]
+    fn deserializes_newtype_struct_from_inner_value() {
+        let callback = serde_json::from_str::<Jsone<CallbackFn>>("367197945").unwrap();
+
+        assert_eq!(callback, Jsone(CallbackFn(367197945)));
+    }
+
+    #[test]
+    fn deserializes_externally_tagged_enums_with_remapped_values() {
+        assert_eq!(
+            serde_json::from_str::<Jsone<Message>>(r#""Unit""#).unwrap(),
+            Jsone(Message::Unit)
+        );
+        assert_eq!(
+            serde_json::from_str::<Jsone<Message>>(
+                r#"{"Newtype":{"$$jsone$remap$$":"9007199254740992"}}"#,
+            )
+            .unwrap(),
+            Jsone(Message::Newtype(9_007_199_254_740_992))
+        );
+        assert_eq!(
+            serde_json::from_str::<Jsone<Message>>(
+                r#"{"Tuple":[{"$$jsone$remap$$":"9007199254740992"},{"$$jsone$remap$$":"-9007199254740992"}]}"#,
+            )
+            .unwrap(),
+            Jsone(Message::Tuple(
+                9_007_199_254_740_992,
+                -9_007_199_254_740_992
+            ))
+        );
+        assert_eq!(
+            serde_json::from_str::<Jsone<Message>>(
+                r#"{"Struct":{"id":{"$$jsone$remap$$":"9007199254740992"}}}"#,
+            )
+            .unwrap(),
+            Jsone(Message::Struct {
+                id: 9_007_199_254_740_992
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_finite_floats_as_numbers() {
+        assert_eq!(serde_json::to_string(&Jsone(1e100_f64)).unwrap(), "1e+100");
+        assert_eq!(
+            serde_json::to_string(&Jsone(9_007_199_254_740_992.5_f64)).unwrap(),
+            "9007199254740992.0"
         );
     }
 

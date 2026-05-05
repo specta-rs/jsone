@@ -39,7 +39,10 @@ function encodeValue(value, seen) {
     if (Number.isNaN(value)) return { [REMAP_KEY]: 1 };
     else if (value === Number.POSITIVE_INFINITY) return { [REMAP_KEY]: 2 };
     else if (value === Number.NEGATIVE_INFINITY) return { [REMAP_KEY]: 3 };
-    else if (value < Number.MIN_SAFE_INTEGER || value > Number.MAX_SAFE_INTEGER)
+    else if (
+      Number.isInteger(value) &&
+      (value < Number.MIN_SAFE_INTEGER || value > Number.MAX_SAFE_INTEGER)
+    )
       return { [REMAP_KEY]: value.toString() };
   }
 
@@ -82,6 +85,15 @@ function encodeValue(value, seen) {
  * @returns {unknown}
  */
 export function decode(value) {
+  return decodeValue(value);
+}
+
+/**
+ * @param {unknown} value
+ * @param {WeakSet<object>} [seen]
+ * @returns {unknown}
+ */
+function decodeValue(value, seen) {
   if (typeof value !== "object" || value === null) return value;
 
   let isRemappedWrapper = false;
@@ -109,15 +121,20 @@ export function decode(value) {
     );
   }
 
+  seen ??= new WeakSet();
+  if (seen.has(value)) return value;
+
+  seen.add(value);
+
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1)
-      value[index] = decode(value[index]);
+      value[index] = decodeValue(value[index], seen);
 
     return value;
   }
 
   for (const key in value)
-    if (hasOwn.call(value, key)) value[key] = decode(value[key]);
+    if (hasOwn.call(value, key)) value[key] = decodeValue(value[key], seen);
 
   return value;
 }
