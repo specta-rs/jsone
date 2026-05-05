@@ -1,0 +1,25 @@
+[package]
+name = "jsone"
+description = "Zero-loss JSON serialization for Rust"
+version = "0.1.0"
+authors = ["Oscar Beaumont <oscar@otbeaumont.me>"]
+edition = "2024"
+license = "MIT"
+include = ["/src", "/LICENSE", "/README.md"]
+repository = "https://github.com/oscartbeaumont/jsone"
+documentation = "https://docs.rs/jsone/latest/jsone"
+keywords = ["json", "serde", "javascript", "bigint"]
+categories = ["encoding", "web-programming"]
+readme = "README.md"
+
+[package.metadata."docs.rs"]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# We enable this feature, but don't actually use `serde_json`
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+
+[dev-dependencies]
+serde_json = "1"
