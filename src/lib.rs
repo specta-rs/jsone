@@ -54,7 +54,7 @@ const JS_RUNTIME_STR: &str = include_str!("./index.js");
 
 /// The JavaScript runtime for encoding and decoding.
 ///
-/// You can expand and copy the runtime into your project! Otherwise you can use this [`RUNTIME`] constant directly!
+/// You can expand and copy the runtime into your project! Otherwise you can use this `RUNTIME` constant directly!
 ///
 #[doc = "<details>"]
 #[doc = "<summary>Show JavaScript runtime</summary>"]
@@ -612,8 +612,19 @@ impl<'de> Deserializer<'de> for JsoneJsonValueDeserializer {
         }
     }
 
+    fn deserialize_newtype_struct<V>(
+        self,
+        _name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        visitor.visit_newtype_struct(self)
+    }
+
     forward_to_deserialize_any! {
-        bool char str string bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        bool char str string bytes byte_buf option unit unit_struct seq tuple
         tuple_struct map struct enum identifier ignored_any
     }
 }
