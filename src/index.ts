@@ -10,14 +10,14 @@ export type RemappedValue = {
 export type RemappedBigInt = RemappedValue;
 
 /**
- * Serializes a value with bigint support.
+ * JSON.stringify replacer that encodes values JSON cannot carry losslessly.
  *
  * Bigint values, unsafe numbers, and special floating point values are encoded
  * with `{ "$$jsone$remap$$": ... }` so the resulting string is valid JSON and
  * can be deserialized by this package's Rust `Jsone<T>` wrapper.
  */
-export function stringify(value: unknown, space?: string | number): string {
-  return JSON.stringify(value, (_key, value) => remapValue(value), space);
+export function replacer(_key: string, value: unknown): unknown {
+  return remapValue(value);
 }
 
 /**
@@ -45,17 +45,15 @@ export function remapBigIntsInPlace<T>(value: T): T | RemappedBigInt {
 }
 
 /**
- * Parses JSON produced by `stringify` and restores remapped wrappers to native
- * JavaScript values.
+ * JSON.parse reviver that restores remapped wrappers to native JavaScript
+ * values.
  */
-export function parse<T = unknown>(text: string): T {
-  return JSON.parse(text, (_key, value) => {
-    if (isRemappedValue(value)) {
-      return restoreValue(value);
-    }
+export function reviver(_key: string, value: unknown): unknown {
+  if (isRemappedValue(value)) {
+    return restoreValue(value);
+  }
 
-    return value;
-  }) as T;
+  return value;
 }
 
 function remapValue(value: unknown): unknown {
