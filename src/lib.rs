@@ -612,6 +612,16 @@ impl<'de> Deserializer<'de> for JsoneJsonValueDeserializer {
         }
     }
 
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.0 {
+            serde_json::Value::Null => visitor.visit_none(),
+            _ => visitor.visit_some(self),
+        }
+    }
+
     fn deserialize_newtype_struct<V>(
         self,
         _name: &'static str,
@@ -651,7 +661,7 @@ impl<'de> Deserializer<'de> for JsoneJsonValueDeserializer {
     }
 
     forward_to_deserialize_any! {
-        bool char str string bytes byte_buf option unit unit_struct seq tuple
+        bool char str string bytes byte_buf unit unit_struct seq tuple
         tuple_struct map struct identifier ignored_any
     }
 }
@@ -912,6 +922,36 @@ mod tests {
                     },
                 })
             }
+        );
+    }
+
+    #[test]
+    fn deserializes_remapped_value_as_some() {
+        assert_eq!(
+            serde_json::from_str::<Jsone<Option<u128>>>(
+                r#"{"$$jsone$remap$$":"340282366920938463463374607431768211455"}"#,
+            )
+            .unwrap(),
+            Jsone(Some(u128::MAX))
+        );
+    }
+
+    #[test]
+    fn deserializes_remapped_json_value_as_some() {
+        assert_eq!(
+            serde_json::from_str::<Jsone<Option<serde_json::Value>>>(
+                r#"{"$$jsone$remap$$":"340282366920938463463374607431768211455"}"#,
+            )
+            .unwrap(),
+            Jsone(Some(serde_json::Value::String(u128::MAX.to_string())))
+        );
+    }
+
+    #[test]
+    fn deserializes_null_as_none() {
+        assert_eq!(
+            serde_json::from_str::<Jsone<Option<u128>>>("null").unwrap(),
+            Jsone(None)
         );
     }
 
