@@ -33,7 +33,7 @@
 //! }
 //!
 //! let json = serde_json::to_string(&Payload { id: Jsone(42) }).unwrap();
-//! assert_eq!(json, r#"{"id":{"$$jsone$remap$$":"42"}}"#);
+//! assert_eq!(json, r#"{"id":42}"#);
 //!
 //! let payload: Payload = serde_json::from_str(&json).unwrap();
 //! assert_eq!(payload.id, Jsone(42));
@@ -56,6 +56,8 @@ pub const RUNTIME: &str = include_str!("./index.ts");
 /// Field name used for the JSON object that marks the remapped value.
 /// Changing this would require the frontend to also reflect the new value so would be a majorly breaking change.
 const REMAP_KEY: &str = "$$jsone$remap$$";
+const MAX_SAFE_INTEGER: i128 = 9_007_199_254_740_991;
+const MIN_SAFE_INTEGER: i128 = -MAX_SAFE_INTEGER;
 
 /// Serde wrapper that applies the remap logic.
 ///
@@ -92,10 +94,26 @@ where
 
 struct JsoneSerializer<S>(S);
 
-macro_rules! serialize_number_as_string {
+macro_rules! serialize_signed_number {
     ($method:ident, $ty:ty) => {
         fn $method(self, value: $ty) -> Result<Self::Ok, Self::Error> {
-            serialize_remapped_value(self.0, &value.to_string())
+            if (MIN_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&(value as i128)) {
+                self.0.$method(value)
+            } else {
+                serialize_remapped_value(self.0, &value.to_string())
+            }
+        }
+    };
+}
+
+macro_rules! serialize_unsigned_number {
+    ($method:ident, $ty:ty) => {
+        fn $method(self, value: $ty) -> Result<Self::Ok, Self::Error> {
+            if value as u128 <= MAX_SAFE_INTEGER as u128 {
+                self.0.$method(value)
+            } else {
+                serialize_remapped_value(self.0, &value.to_string())
+            }
         }
     };
 }
@@ -128,16 +146,16 @@ where
         self.0.serialize_bool(value)
     }
 
-    serialize_number_as_string!(serialize_i8, i8);
-    serialize_number_as_string!(serialize_i16, i16);
-    serialize_number_as_string!(serialize_i32, i32);
-    serialize_number_as_string!(serialize_i64, i64);
-    serialize_number_as_string!(serialize_i128, i128);
-    serialize_number_as_string!(serialize_u8, u8);
-    serialize_number_as_string!(serialize_u16, u16);
-    serialize_number_as_string!(serialize_u32, u32);
-    serialize_number_as_string!(serialize_u64, u64);
-    serialize_number_as_string!(serialize_u128, u128);
+    serialize_signed_number!(serialize_i8, i8);
+    serialize_signed_number!(serialize_i16, i16);
+    serialize_signed_number!(serialize_i32, i32);
+    serialize_signed_number!(serialize_i64, i64);
+    serialize_signed_number!(serialize_i128, i128);
+    serialize_unsigned_number!(serialize_u8, u8);
+    serialize_unsigned_number!(serialize_u16, u16);
+    serialize_unsigned_number!(serialize_u32, u32);
+    serialize_unsigned_number!(serialize_u64, u64);
+    serialize_unsigned_number!(serialize_u128, u128);
 
     fn serialize_f32(self, value: f32) -> Result<Self::Ok, Self::Error> {
         self.serialize_f64(value.into())
@@ -150,6 +168,8 @@ where
             serialize_remapped_value(self.0, &2u8)
         } else if value == f64::NEG_INFINITY {
             serialize_remapped_value(self.0, &3u8)
+        } else if value >= MIN_SAFE_INTEGER as f64 && value <= MAX_SAFE_INTEGER as f64 {
+            self.0.serialize_f64(value)
         } else {
             serialize_remapped_value(self.0, &value.to_string())
         }
@@ -260,9 +280,7 @@ where
         name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        self.0
-            .serialize_struct(name, len)
-            .map(JsoneSerializeStruct)
+        self.0.serialize_struct(name, len).map(JsoneSerializeStruct)
     }
 
     fn serialize_struct_variant(
@@ -669,10 +687,30 @@ mod tests {
     }
 
     #[test]
-    fn serializes_value_as_string_wrapped_by_remap_key() {
+    fn serializes_safe_integer_as_number() {
         let json = serde_json::to_string(&Payload { value: Jsone(123) }).unwrap();
 
-        assert_eq!(json, r#"{"value":{"$$jsone$remap$$":"123"}}"#);
+        assert_eq!(json, r#"{"value":123}"#);
+        assert_eq!(
+            serde_json::to_string(&Jsone(9_007_199_254_740_991i64)).unwrap(),
+            "9007199254740991"
+        );
+        assert_eq!(
+            serde_json::to_string(&Jsone(-9_007_199_254_740_991i64)).unwrap(),
+            "-9007199254740991"
+        );
+    }
+
+    #[test]
+    fn serializes_unsafe_integer_as_string_wrapped_by_remap_key() {
+        assert_eq!(
+            serde_json::to_string(&Jsone(9_007_199_254_740_992i64)).unwrap(),
+            r#"{"$$jsone$remap$$":"9007199254740992"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Jsone(-9_007_199_254_740_992i64)).unwrap(),
+            r#"{"$$jsone$remap$$":"-9007199254740992"}"#
+        );
     }
 
     #[test]
@@ -699,7 +737,7 @@ mod tests {
 
         assert_eq!(
             json,
-            r#"{"value":{"id":{"$$jsone$remap$$":"123"},"label":"unchanged","child":{"count":{"$$jsone$remap$$":"-5"},"active":true}}}"#
+            r#"{"value":{"id":123,"label":"unchanged","child":{"count":-5,"active":true}}}"#
         );
     }
 
@@ -727,7 +765,7 @@ mod tests {
 
         assert_eq!(
             json,
-            r#"[{"id":{"$$jsone$remap$$":"123"},"label":"first","child":{"count":{"$$jsone$remap$$":"-5"},"active":true}},{"id":{"$$jsone$remap$$":"456"},"label":"second","child":{"count":{"$$jsone$remap$$":"7"},"active":false}}]"#
+            r#"[{"id":123,"label":"first","child":{"count":-5,"active":true}},{"id":456,"label":"second","child":{"count":7,"active":false}}]"#
         );
     }
 
