@@ -1,11 +1,11 @@
 [package]
 name = "jsone"
 description = "Zero-loss JSON serialization for Rust"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Oscar Beaumont <oscar@otbeaumont.me>"]
 edition = "2024"
 license = "MIT"
-include = ["/src", "/LICENSE", "/README.md"]
+include = ["/src", "/LICENSE", "/README.md", "/examples"]
 repository = "https://github.com/oscartbeaumont/jsone"
 documentation = "https://docs.rs/jsone/latest/jsone"
 keywords = ["json", "serde", "javascript", "bigint"]
