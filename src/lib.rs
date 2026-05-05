@@ -48,10 +48,22 @@ use serde::ser::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer, forward_to_deserialize_any};
 use std::fmt;
 
+// This is used to hide the raw string from being printed by Rustdoc inline.
+// We do that manually using a revealable section.
+const JS_RUNTIME_STR: &str = include_str!("./index.ts");
+
 /// The JavaScript runtime for encoding and decoding.
 ///
-/// You should copy this into your project!
-pub const RUNTIME: &str = include_str!("./index.ts");
+/// You can expand and copy the runtime into your project! Otherwise you can use this [`RUNTIME`] constant directly!
+///
+#[doc = "<details>"]
+#[doc = "<summary>Show JavaScript runtime</summary>"]
+#[doc = ""]
+#[doc = "```ts"]
+#[doc = include_str!("./index.ts")]
+#[doc = "```"]
+#[doc = "</details>"]
+pub const RUNTIME: &str = JS_RUNTIME_STR;
 
 /// Field name used for the JSON object that marks the remapped value.
 /// Changing this would require the frontend to also reflect the new value so would be a majorly breaking change.
