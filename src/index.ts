@@ -2,14 +2,22 @@
 const REMAP_KEY = "$$jsone$remap$$";
 
 /**
- * JSON.stringify replacer that encodes values JSON cannot carry losslessly.
+ * JSON.stringify `replacer` parameter that encodes values JSON cannot carry losslessly.
  *
  * Bigint values, unsafe numbers, and special floating point values are encoded
  * with `{ "$$jsone$remap$$": ... }` so the resulting string is valid JSON and
  * can be deserialized by this package's Rust `Jsone<T>` wrapper.
  */
 export function replacer(_key: string, value: unknown): unknown {
-  return remapValue(value);
+  if (typeof value === "bigint") return { [REMAP_KEY]: value.toString() };
+  if (typeof value !== "number") return value;
+  if (Number.isNaN(value)) return { [REMAP_KEY]: 1 };
+  if (value === Number.POSITIVE_INFINITY) return { [REMAP_KEY]: 2 };
+  if (value === Number.NEGATIVE_INFINITY) return { [REMAP_KEY]: 3 };
+  if (value < Number.MIN_SAFE_INTEGER || value > Number.MAX_SAFE_INTEGER)
+    return { [REMAP_KEY]: value.toString() };
+
+  return value;
 }
 
 /**
@@ -22,8 +30,32 @@ export function replacer(_key: string, value: unknown): unknown {
  * If the root value itself needs remapping, a new remapped wrapper is returned
  * because primitives cannot be reassigned in place.
  */
-export function remapValuesInPlace<T>(value: T): unknown {
-  return remapValuesInPlaceInner(value, new WeakSet<object>());
+export function remapValuesInPlace<T>(
+  value: T,
+  seen = new WeakSet<object>(),
+): unknown {
+  const remapped = replacer("", value);
+
+  if (remapped !== value) return remapped;
+  if (typeof value !== "object" || value === null) return value;
+  if (seen.has(value)) return value;
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1)
+      value[index] = remapValuesInPlace(value[index], seen);
+
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  for (const key in record)
+    if (Object.prototype.hasOwnProperty.call(record, key))
+      record[key] = remapValuesInPlace(record[key], seen);
+
+  return value;
 }
 
 /**
@@ -39,115 +71,31 @@ export function remapBigIntsInPlace<T>(value: T): unknown {
  * values.
  */
 export function reviver(_key: string, value: unknown): unknown {
-  if (isRemappedValue(value)) {
-    return restoreValue(value);
-  }
+  if (isRemappedValue(value)) return restoreValue(value);
 
   return value;
 }
 
-function remapValue(value: unknown): unknown {
-  if (typeof value === "bigint") {
-    return remapBigInt(value);
-  }
-
-  if (typeof value === "number") {
-    return remapNumber(value);
-  }
-
-  return value;
-}
-
-function remapBigInt(value: bigint): unknown {
-  return { [REMAP_KEY]: value.toString() };
-}
-
-function remapNumber(value: number): unknown {
-  if (Number.isNaN(value)) {
-    return { [REMAP_KEY]: 1 };
-  }
-
-  if (value === Number.POSITIVE_INFINITY) {
-    return { [REMAP_KEY]: 2 };
-  }
-
-  if (value === Number.NEGATIVE_INFINITY) {
-    return { [REMAP_KEY]: 3 };
-  }
-
-  if (value < Number.MIN_SAFE_INTEGER || value > Number.MAX_SAFE_INTEGER) {
-    return { [REMAP_KEY]: value.toString() };
-  }
-
-  return value;
-}
-
-function restoreValue(value: Record<typeof REMAP_KEY, unknown>): bigint | number {
+function restoreValue(
+  value: Record<typeof REMAP_KEY, unknown>,
+): bigint | number {
   const remapped = value[REMAP_KEY];
 
-  if (typeof remapped === "string") {
-    return BigInt(remapped);
-  }
-
-  if (remapped === 1) {
-    return Number.NaN;
-  }
-
-  if (remapped === 2) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  if (remapped === 3) {
-    return Number.NEGATIVE_INFINITY;
-  }
+  if (typeof remapped === "string") return BigInt(remapped);
+  if (remapped === 1) return Number.NaN;
+  if (remapped === 2) return Number.POSITIVE_INFINITY;
+  if (remapped === 3) return Number.NEGATIVE_INFINITY;
 
   throw new TypeError(`unknown remapped numeric code: ${remapped}`);
 }
 
-function isRemappedValue(value: unknown): value is Record<typeof REMAP_KEY, unknown> {
+function isRemappedValue(
+  value: unknown,
+): value is Record<typeof REMAP_KEY, unknown> {
   return (
     typeof value === "object" &&
     value !== null &&
     Object.keys(value).length === 1 &&
     REMAP_KEY in value
   );
-}
-
-function remapValuesInPlaceInner(
-  value: unknown,
-  seen: WeakSet<object>,
-): unknown {
-  const remapped = remapValue(value);
-
-  if (remapped !== value) {
-    return remapped;
-  }
-
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-
-  if (seen.has(value)) {
-    return value;
-  }
-
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      value[index] = remapValuesInPlaceInner(value[index], seen);
-    }
-
-    return value;
-  }
-
-  const record = value as Record<string, unknown>;
-
-  for (const key in record) {
-    if (Object.prototype.hasOwnProperty.call(record, key)) {
-      record[key] = remapValuesInPlaceInner(record[key], seen);
-    }
-  }
-
-  return value;
 }
