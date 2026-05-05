@@ -1,7 +1,5 @@
-/** Field name used by the Rust serde wrapper and JavaScript remapper. */
-export const REMAP_KEY = "$$jsone$remap$$";
-export const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
-export const MIN_SAFE_INTEGER = Number.MIN_SAFE_INTEGER;
+// This MUST match the value in Rust.
+const REMAP_KEY = "$$jsone$remap$$";
 
 /** Wire-format object used to represent values that JSON cannot carry losslessly. */
 export type RemappedValue = {
@@ -19,11 +17,7 @@ export type RemappedBigInt = RemappedValue;
  * can be deserialized by this package's Rust `Jsone<T>` wrapper.
  */
 export function stringify(value: unknown, space?: string | number): string {
-  return JSON.stringify(
-    value,
-    (_key, value) => remapValue(value),
-    space,
-  );
+  return JSON.stringify(value, (_key, value) => remapValue(value), space);
 }
 
 /**
@@ -93,7 +87,7 @@ function remapNumber(value: number): number | RemappedValue {
     return { [REMAP_KEY]: 3 };
   }
 
-  if (value < MIN_SAFE_INTEGER || value > MAX_SAFE_INTEGER) {
+  if (value < Number.MIN_SAFE_INTEGER || value > Number.MAX_SAFE_INTEGER) {
     return { [REMAP_KEY]: value.toString() };
   }
 
