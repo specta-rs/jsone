@@ -72,9 +72,7 @@ where
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(1))?;
-        map.serialize_entry(REMAP_KEY, &BigIntValueSerialize(&self.0))?;
-        map.end()
+        self.0.serialize(BigIntSerializer(serializer))
     }
 }
 
@@ -97,9 +95,19 @@ struct BigIntSerializer<S>(S);
 macro_rules! serialize_number_as_string {
     ($method:ident, $ty:ty) => {
         fn $method(self, value: $ty) -> Result<Self::Ok, Self::Error> {
-            self.0.serialize_str(&value.to_string())
+            serialize_remapped_value(self.0, &value.to_string())
         }
     };
+}
+
+fn serialize_remapped_value<S, T>(serializer: S, value: &T) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: ?Sized + Serialize,
+{
+    let mut map = serializer.serialize_map(Some(1))?;
+    map.serialize_entry(REMAP_KEY, value)?;
+    map.end()
 }
 
 impl<S> Serializer for BigIntSerializer<S>
@@ -137,13 +145,13 @@ where
 
     fn serialize_f64(self, value: f64) -> Result<Self::Ok, Self::Error> {
         if value.is_nan() {
-            self.0.serialize_u8(1)
+            serialize_remapped_value(self.0, &1u8)
         } else if value == f64::INFINITY {
-            self.0.serialize_u8(2)
+            serialize_remapped_value(self.0, &2u8)
         } else if value == f64::NEG_INFINITY {
-            self.0.serialize_u8(3)
+            serialize_remapped_value(self.0, &3u8)
         } else {
-            self.0.serialize_str(&value.to_string())
+            serialize_remapped_value(self.0, &value.to_string())
         }
     }
 
@@ -439,130 +447,44 @@ where
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_map(BigIntVisitor(std::marker::PhantomData))
-    }
-}
+        let value = serde_json::Value::deserialize(deserializer)?;
 
-struct BigIntVisitor<T>(std::marker::PhantomData<T>);
-
-impl<'de, T> Visitor<'de> for BigIntVisitor<T>
-where
-    T: Deserialize<'de>,
-{
-    type Value = BigInt<T>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a map containing a $bigint field")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut value = None;
-
-        while let Some(key) = map.next_key::<&str>()? {
-            if key == REMAP_KEY {
-                if value.is_some() {
-                    return Err(A::Error::duplicate_field(REMAP_KEY));
-                }
-
-                value = Some(map.next_value::<BigIntValue<T>>()?.0);
-            } else {
-                return Err(A::Error::unknown_field(key, &[REMAP_KEY]));
-            }
-        }
-
-        value
+        T::deserialize(BigIntJsonValueDeserializer(unwrap_remapped_values(value)))
             .map(BigInt)
-            .ok_or_else(|| A::Error::missing_field(REMAP_KEY))
+            .map_err(D::Error::custom)
     }
 }
 
-struct BigIntValue<T>(T);
+fn unwrap_remapped_values(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(unwrap_remapped_values).collect())
+        }
+        serde_json::Value::Object(mut values) => {
+            if values.len() == 1 && values.contains_key(REMAP_KEY) {
+                let value = values.remove(REMAP_KEY).expect("remap key exists");
 
-impl<'de, T> Deserialize<'de> for BigIntValue<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(BigIntValueVisitor(std::marker::PhantomData))
-    }
-}
+                return match value {
+                    serde_json::Value::Number(number)
+                        if matches!(number.as_u64(), Some(1 | 2 | 3)) =>
+                    {
+                        serde_json::Value::Number(number)
+                    }
+                    serde_json::Value::Number(number) => {
+                        serde_json::json!({ REMAP_KEY: number })
+                    }
+                    value => unwrap_remapped_values(value),
+                };
+            }
 
-struct BigIntValueVisitor<T>(std::marker::PhantomData<T>);
-
-impl<'de, T> Visitor<'de> for BigIntValueVisitor<T>
-where
-    T: Deserialize<'de>,
-{
-    type Value = BigIntValue<T>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a bigint string or special numeric code")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        T::deserialize(BigIntValueDeserializer::String(value))
-            .map(BigIntValue)
-            .map_err(E::custom)
-    }
-
-    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        self.visit_str(&value)
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        T::deserialize(BigIntValueDeserializer::Code(value))
-            .map(BigIntValue)
-            .map_err(E::custom)
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        u64::try_from(value)
-            .map_err(E::custom)
-            .and_then(|value| self.visit_u64(value))
-    }
-
-    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let value = serde_json::Value::deserialize(serde::de::value::SeqAccessDeserializer::new(
-            seq,
-        ))?;
-
-        T::deserialize(BigIntJsonValueDeserializer(value))
-            .map(BigIntValue)
-            .map_err(A::Error::custom)
-    }
-
-    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let value = serde_json::Value::deserialize(serde::de::value::MapAccessDeserializer::new(
-            map,
-        ))?;
-
-        T::deserialize(BigIntJsonValueDeserializer(value))
-            .map(BigIntValue)
-            .map_err(A::Error::custom)
+            serde_json::Value::Object(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, unwrap_remapped_values(value)))
+                    .collect(),
+            )
+        }
+        value => value,
     }
 }
 
@@ -575,11 +497,9 @@ macro_rules! deserialize_json_number_from_string {
             V: Visitor<'de>,
         {
             match self.0 {
-                serde_json::Value::String(value) => visitor.$visit(
-                    value
-                        .parse::<$ty>()
-                        .map_err(Self::Error::custom)?,
-                ),
+                serde_json::Value::String(value) => {
+                    visitor.$visit(value.parse::<$ty>().map_err(Self::Error::custom)?)
+                }
                 value => value.into_deserializer().$method(visitor),
             }
         }
@@ -596,9 +516,9 @@ impl<'de> Deserializer<'de> for BigIntJsonValueDeserializer {
         match self.0 {
             serde_json::Value::Null => visitor.visit_unit(),
             serde_json::Value::Bool(value) => visitor.visit_bool(value),
-            serde_json::Value::Number(value) => {
-                serde_json::Value::Number(value).into_deserializer().deserialize_any(visitor)
-            }
+            serde_json::Value::Number(value) => serde_json::Value::Number(value)
+                .into_deserializer()
+                .deserialize_any(visitor),
             serde_json::Value::String(value) => visitor.visit_string(value),
             serde_json::Value::Array(values) => visitor.visit_seq(BigIntJsonSeqAccess {
                 values: values.into_iter(),
@@ -720,170 +640,6 @@ impl<'de> MapAccess<'de> for BigIntJsonMapAccess {
     }
 }
 
-enum BigIntValueDeserializer<'a> {
-    String(&'a str),
-    Code(u64),
-}
-
-impl<'de> Deserializer<'de> for BigIntValueDeserializer<'_> {
-    type Error = serde::de::value::Error;
-
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            Self::String(value) => visitor.visit_str(value),
-            Self::Code(1) => visitor.visit_f64(f64::NAN),
-            Self::Code(2) => visitor.visit_f64(f64::INFINITY),
-            Self::Code(3) => visitor.visit_f64(f64::NEG_INFINITY),
-            Self::Code(_) => Err(Self::Error::custom(
-                "expected special bigint code 1, 2, or 3",
-            )),
-        }
-    }
-
-    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_i8(parse_string(self)?)
-    }
-
-    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_i16(parse_string(self)?)
-    }
-
-    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_i32(parse_string(self)?)
-    }
-
-    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_i64(parse_string(self)?)
-    }
-
-    fn deserialize_i128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_i128(parse_string(self)?)
-    }
-
-    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_u8(parse_string(self)?)
-    }
-
-    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_u16(parse_string(self)?)
-    }
-
-    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_u32(parse_string(self)?)
-    }
-
-    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_u64(parse_string(self)?)
-    }
-
-    fn deserialize_u128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_u128(parse_string(self)?)
-    }
-
-    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            Self::String(value) => visitor.visit_f32(value.parse().map_err(Self::Error::custom)?),
-            Self::Code(1) => visitor.visit_f32(f32::NAN),
-            Self::Code(2) => visitor.visit_f32(f32::INFINITY),
-            Self::Code(3) => visitor.visit_f32(f32::NEG_INFINITY),
-            Self::Code(_) => Err(Self::Error::custom(
-                "expected special bigint code 1, 2, or 3",
-            )),
-        }
-    }
-
-    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            Self::String(value) => visitor.visit_f64(value.parse().map_err(Self::Error::custom)?),
-            Self::Code(1) => visitor.visit_f64(f64::NAN),
-            Self::Code(2) => visitor.visit_f64(f64::INFINITY),
-            Self::Code(3) => visitor.visit_f64(f64::NEG_INFINITY),
-            Self::Code(_) => Err(Self::Error::custom(
-                "expected special bigint code 1, 2, or 3",
-            )),
-        }
-    }
-
-    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            Self::String(value) => visitor.visit_str(value),
-            Self::Code(_) => self.deserialize_any(visitor),
-        }
-    }
-
-    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            Self::String(value) => visitor.visit_string(value.to_owned()),
-            Self::Code(_) => self.deserialize_any(visitor),
-        }
-    }
-
-    forward_to_deserialize_any! {
-        bool char bytes byte_buf option unit unit_struct newtype_struct seq tuple
-        tuple_struct map struct enum identifier ignored_any
-    }
-}
-
-fn parse_string<T>(deserializer: BigIntValueDeserializer<'_>) -> Result<T, serde::de::value::Error>
-where
-    T: std::str::FromStr,
-    T::Err: fmt::Display,
-{
-    match deserializer {
-        BigIntValueDeserializer::String(value) => {
-            value.parse().map_err(serde::de::value::Error::custom)
-        }
-        BigIntValueDeserializer::Code(_) => Err(serde::de::value::Error::custom(
-            "expected bigint string, found special bigint code",
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{BigInt, REMAP_KEY};
@@ -943,7 +699,7 @@ mod tests {
 
         assert_eq!(
             json,
-            r#"{"value":{"$$jsone$remap$$":{"id":"123","label":"unchanged","child":{"count":"-5","active":true}}}}"#
+            r#"{"value":{"id":{"$$jsone$remap$$":"123"},"label":"unchanged","child":{"count":{"$$jsone$remap$$":"-5"},"active":true}}}"#
         );
     }
 
@@ -971,14 +727,14 @@ mod tests {
 
         assert_eq!(
             json,
-            r#"{"$$jsone$remap$$":[{"id":"123","label":"first","child":{"count":"-5","active":true}},{"id":"456","label":"second","child":{"count":"7","active":false}}]}"#
+            r#"[{"id":{"$$jsone$remap$$":"123"},"label":"first","child":{"count":{"$$jsone$remap$$":"-5"},"active":true}},{"id":{"$$jsone$remap$$":"456"},"label":"second","child":{"count":{"$$jsone$remap$$":"7"},"active":false}}]"#
         );
     }
 
     #[test]
     fn deserializes_nested_object_number_fields_from_their_original_locations() {
         let payload: NestedPayload = serde_json::from_str(
-            r#"{"value":{"$$jsone$remap$$":{"id":"123","label":"unchanged","child":{"count":"-5","active":true}}}}"#,
+            r#"{"value":{"id":{"$$jsone$remap$$":"123"},"label":"unchanged","child":{"count":{"$$jsone$remap$$":"-5"},"active":true}}}"#,
         )
         .unwrap();
 
@@ -1035,14 +791,14 @@ mod tests {
     fn rejects_unknown_fields() {
         let error = serde_json::from_str::<BigInt<i32>>(r#"{"unknown":"123"}"#).unwrap_err();
 
-        assert!(error.to_string().contains("unknown field `unknown`"));
+        assert!(error.to_string().contains("invalid type"));
     }
 
     #[test]
     fn rejects_missing_bigint_key() {
         let error = serde_json::from_str::<BigInt<i32>>("{}").unwrap_err();
 
-        assert!(error.to_string().contains("missing field"));
+        assert!(error.to_string().contains("invalid type"));
     }
 
     #[test]
@@ -1050,10 +806,6 @@ mod tests {
         let error =
             serde_json::from_str::<BigInt<f64>>(&format!(r#"{{"{REMAP_KEY}":4}}"#)).unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("expected special bigint code 1, 2, or 3")
-        );
+        assert!(error.to_string().contains("invalid type"));
     }
 }

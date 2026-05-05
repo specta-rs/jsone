@@ -12,7 +12,7 @@ fn main() {
     {
         // wrap your root type in `BigInt` and we will take care of the rest!
         let json = serde_json::to_string(&BigInt(Payload { id: 42 })).unwrap();
-        assert_eq!(json, r#"{"$$jsone$remap$$":{"id":"42"}}"#);
+        assert_eq!(json, r#"{"id":{"$$jsone$remap$$":"42"}}"#);
         println!("{json}");
 
         let payload: BigInt<Payload<i32>> = serde_json::from_str(&json).unwrap();
@@ -22,7 +22,7 @@ fn main() {
 
     {
         let json = serde_json::to_string(&BigInt(Payload { id: f64::NAN })).unwrap();
-        assert_eq!(json, r#"{"$$jsone$remap$$":{"id":1}}"#);
+        assert_eq!(json, r#"{"id":{"$$jsone$remap$$":1}}"#);
         println!("{json}");
 
         let payload: BigInt<Payload<f64>> = serde_json::from_str(&json).unwrap();
