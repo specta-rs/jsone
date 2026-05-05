@@ -5,30 +5,28 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 struct Payload<N> {
-    id: BigInt<N>,
+    id: N,
 }
 
 fn main() {
     {
-        let json = serde_json::to_string(&Payload { id: BigInt(42) }).unwrap();
-        assert_eq!(json, r#"{"id":{"$$jsone$remap$$":"42"}}"#);
+        // wrap your root type in `BigInt` and we will take care of the rest!
+        let json = serde_json::to_string(&BigInt(Payload { id: 42 })).unwrap();
+        assert_eq!(json, r#"{"$$jsone$remap$$":{"id":"42"}}"#);
         println!("{json}");
 
-        let payload: Payload<i32> = serde_json::from_str(&json).unwrap();
-        assert_eq!(payload.id, BigInt(42));
+        let payload: BigInt<Payload<i32>> = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload.0.id, 42);
         println!("{payload:?}");
     }
 
     {
-        let json = serde_json::to_string(&Payload {
-            id: BigInt(f64::NAN),
-        })
-        .unwrap();
-        assert_eq!(json, r#"{"id":{"$$jsone$remap$$":1}}"#);
+        let json = serde_json::to_string(&BigInt(Payload { id: f64::NAN })).unwrap();
+        assert_eq!(json, r#"{"$$jsone$remap$$":{"id":1}}"#);
         println!("{json}");
 
-        let payload: Payload<f64> = serde_json::from_str(&json).unwrap();
-        assert!(payload.id.0.is_nan());
+        let payload: BigInt<Payload<f64>> = serde_json::from_str(&json).unwrap();
+        assert!(payload.0.id.is_nan());
         println!("{payload:?}");
     }
 }

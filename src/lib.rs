@@ -40,7 +40,7 @@
 //! ```
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use serde::de::{Error, MapAccess, Visitor};
+use serde::de::{Error, IntoDeserializer, MapAccess, SeqAccess, Visitor};
 use serde::ser::{
     SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant,
@@ -538,6 +538,186 @@ where
             .map_err(E::custom)
             .and_then(|value| self.visit_u64(value))
     }
+
+    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let value = serde_json::Value::deserialize(serde::de::value::SeqAccessDeserializer::new(
+            seq,
+        ))?;
+
+        T::deserialize(BigIntJsonValueDeserializer(value))
+            .map(BigIntValue)
+            .map_err(A::Error::custom)
+    }
+
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let value = serde_json::Value::deserialize(serde::de::value::MapAccessDeserializer::new(
+            map,
+        ))?;
+
+        T::deserialize(BigIntJsonValueDeserializer(value))
+            .map(BigIntValue)
+            .map_err(A::Error::custom)
+    }
+}
+
+struct BigIntJsonValueDeserializer(serde_json::Value);
+
+macro_rules! deserialize_json_number_from_string {
+    ($method:ident, $visit:ident, $ty:ty) => {
+        fn $method<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: Visitor<'de>,
+        {
+            match self.0 {
+                serde_json::Value::String(value) => visitor.$visit(
+                    value
+                        .parse::<$ty>()
+                        .map_err(Self::Error::custom)?,
+                ),
+                value => value.into_deserializer().$method(visitor),
+            }
+        }
+    };
+}
+
+impl<'de> Deserializer<'de> for BigIntJsonValueDeserializer {
+    type Error = serde_json::Error;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.0 {
+            serde_json::Value::Null => visitor.visit_unit(),
+            serde_json::Value::Bool(value) => visitor.visit_bool(value),
+            serde_json::Value::Number(value) => {
+                serde_json::Value::Number(value).into_deserializer().deserialize_any(visitor)
+            }
+            serde_json::Value::String(value) => visitor.visit_string(value),
+            serde_json::Value::Array(values) => visitor.visit_seq(BigIntJsonSeqAccess {
+                values: values.into_iter(),
+            }),
+            serde_json::Value::Object(values) => visitor.visit_map(BigIntJsonMapAccess {
+                values: values.into_iter(),
+                next_value: None,
+            }),
+        }
+    }
+
+    deserialize_json_number_from_string!(deserialize_i8, visit_i8, i8);
+    deserialize_json_number_from_string!(deserialize_i16, visit_i16, i16);
+    deserialize_json_number_from_string!(deserialize_i32, visit_i32, i32);
+    deserialize_json_number_from_string!(deserialize_i64, visit_i64, i64);
+    deserialize_json_number_from_string!(deserialize_i128, visit_i128, i128);
+    deserialize_json_number_from_string!(deserialize_u8, visit_u8, u8);
+    deserialize_json_number_from_string!(deserialize_u16, visit_u16, u16);
+    deserialize_json_number_from_string!(deserialize_u32, visit_u32, u32);
+    deserialize_json_number_from_string!(deserialize_u64, visit_u64, u64);
+    deserialize_json_number_from_string!(deserialize_u128, visit_u128, u128);
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.0 {
+            serde_json::Value::String(value) => {
+                visitor.visit_f32(value.parse().map_err(Self::Error::custom)?)
+            }
+            serde_json::Value::Number(value) if value.as_u64() == Some(1) => {
+                visitor.visit_f32(f32::NAN)
+            }
+            serde_json::Value::Number(value) if value.as_u64() == Some(2) => {
+                visitor.visit_f32(f32::INFINITY)
+            }
+            serde_json::Value::Number(value) if value.as_u64() == Some(3) => {
+                visitor.visit_f32(f32::NEG_INFINITY)
+            }
+            value => value.into_deserializer().deserialize_f32(visitor),
+        }
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.0 {
+            serde_json::Value::String(value) => {
+                visitor.visit_f64(value.parse().map_err(Self::Error::custom)?)
+            }
+            serde_json::Value::Number(value) if value.as_u64() == Some(1) => {
+                visitor.visit_f64(f64::NAN)
+            }
+            serde_json::Value::Number(value) if value.as_u64() == Some(2) => {
+                visitor.visit_f64(f64::INFINITY)
+            }
+            serde_json::Value::Number(value) if value.as_u64() == Some(3) => {
+                visitor.visit_f64(f64::NEG_INFINITY)
+            }
+            value => value.into_deserializer().deserialize_f64(visitor),
+        }
+    }
+
+    forward_to_deserialize_any! {
+        bool char str string bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
+    }
+}
+
+struct BigIntJsonSeqAccess {
+    values: std::vec::IntoIter<serde_json::Value>,
+}
+
+impl<'de> SeqAccess<'de> for BigIntJsonSeqAccess {
+    type Error = serde_json::Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        self.values
+            .next()
+            .map(|value| seed.deserialize(BigIntJsonValueDeserializer(value)))
+            .transpose()
+    }
+}
+
+struct BigIntJsonMapAccess {
+    values: serde_json::map::IntoIter,
+    next_value: Option<serde_json::Value>,
+}
+
+impl<'de> MapAccess<'de> for BigIntJsonMapAccess {
+    type Error = serde_json::Error;
+
+    fn next_key_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        match self.values.next() {
+            Some((key, value)) => {
+                self.next_value = Some(value);
+                seed.deserialize(key.into_deserializer()).map(Some)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn next_value_seed<T>(&mut self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        let value = self
+            .next_value
+            .take()
+            .ok_or_else(|| Self::Error::custom("value is missing for map key"))?;
+
+        seed.deserialize(BigIntJsonValueDeserializer(value))
+    }
 }
 
 enum BigIntValueDeserializer<'a> {
@@ -714,6 +894,24 @@ mod tests {
         value: BigInt<i32>,
     }
 
+    #[derive(Debug, Deserialize, PartialEq, Serialize)]
+    struct NestedPayload {
+        value: BigInt<Nested>,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Serialize)]
+    struct Nested {
+        id: u64,
+        label: String,
+        child: NestedChild,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq, Serialize)]
+    struct NestedChild {
+        count: i32,
+        active: bool,
+    }
+
     #[test]
     fn serializes_value_as_string_wrapped_by_bigint_key() {
         let json = serde_json::to_string(&Payload { value: BigInt(123) }).unwrap();
@@ -727,6 +925,76 @@ mod tests {
             serde_json::from_str(r#"{"value":{"$$jsone$remap$$":"123"}}"#).unwrap();
 
         assert_eq!(payload, Payload { value: BigInt(123) });
+    }
+
+    #[test]
+    fn serializes_nested_object_number_fields_at_their_original_locations() {
+        let json = serde_json::to_string(&NestedPayload {
+            value: BigInt(Nested {
+                id: 123,
+                label: "unchanged".to_owned(),
+                child: NestedChild {
+                    count: -5,
+                    active: true,
+                },
+            }),
+        })
+        .unwrap();
+
+        assert_eq!(
+            json,
+            r#"{"value":{"$$jsone$remap$$":{"id":"123","label":"unchanged","child":{"count":"-5","active":true}}}}"#
+        );
+    }
+
+    #[test]
+    fn serializes_nested_array_number_fields_at_their_original_locations() {
+        let json = serde_json::to_string(&BigInt(vec![
+            Nested {
+                id: 123,
+                label: "first".to_owned(),
+                child: NestedChild {
+                    count: -5,
+                    active: true,
+                },
+            },
+            Nested {
+                id: 456,
+                label: "second".to_owned(),
+                child: NestedChild {
+                    count: 7,
+                    active: false,
+                },
+            },
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            json,
+            r#"{"$$jsone$remap$$":[{"id":"123","label":"first","child":{"count":"-5","active":true}},{"id":"456","label":"second","child":{"count":"7","active":false}}]}"#
+        );
+    }
+
+    #[test]
+    fn deserializes_nested_object_number_fields_from_their_original_locations() {
+        let payload: NestedPayload = serde_json::from_str(
+            r#"{"value":{"$$jsone$remap$$":{"id":"123","label":"unchanged","child":{"count":"-5","active":true}}}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            payload,
+            NestedPayload {
+                value: BigInt(Nested {
+                    id: 123,
+                    label: "unchanged".to_owned(),
+                    child: NestedChild {
+                        count: -5,
+                        active: true,
+                    },
+                })
+            }
+        );
     }
 
     #[test]
